@@ -1,0 +1,1337 @@
+<title>Clawd: El Loop</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Un juego de plataformas 3D donde juegas el loop de un agente de IA: observa, piensa, actúa, verifica. Demo de la comunidad. No es un producto oficial de Anthropic.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Clawd: El Loop">
+<meta property="og:title" content="Clawd: El Loop">
+<meta property="og:description" content="Un juego de plataformas 3D donde juegas el loop de un agente de IA: observa, piensa, actúa, verifica. Demo de la comunidad. No es un producto oficial de Anthropic.">
+<meta property="og:url" content="https://clawd-el-loop.pages.dev/">
+<meta property="og:locale" content="es_LA">
+<meta property="og:image" content="https://clawd-el-loop.pages.dev/og.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Pantalla de título de Clawd: El Loop: Clawd, una criatura naranja hecha de cubos, sobre el título, con plataformas 3D de fondo.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Clawd: El Loop">
+<meta name="twitter:description" content="Un juego de plataformas 3D donde juegas el loop de un agente de IA. Demo de la comunidad. No es un producto oficial de Anthropic.">
+<meta name="twitter:image" content="https://clawd-el-loop.pages.dev/og.png">
+<meta name="twitter:image:alt" content="Pantalla de título de Clawd: El Loop: Clawd, una criatura naranja hecha de cubos, sobre el título, con plataformas 3D de fondo.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<style id="ch-ui-css">
+/*__CHISPA_UI_CSS__*/
+</style>
+<style>
+/* Render shell: one full-bleed WebGL canvas; every screen and the HUD live in #ch-ui (chispa-ui.css). */
+:root {
+  --ch-indigo: #1d1a3f; --ch-plum: #4a2a5e; --ch-coral: #ff7a59; --ch-amber: #ffb347;
+  --ch-teal: #2ec4b6; --ch-cream: #fff3dc; --ch-wood: #8a5a3c; --ch-crack: #2a1f24;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { margin: 0; overflow: hidden; background: var(--ch-indigo); color: var(--ch-cream); font-family: "Fraunces", Georgia, "Times New Roman", serif; -webkit-tap-highlight-color: transparent; }
+#ch-view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+#ch-flash { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 55%, rgba(255, 179, 71, 0), rgba(255, 122, 89, 0.38)); opacity: 0; transition: opacity 0.25s ease-out; }
+#ch-flash.ch-on { opacity: 1; transition: none; }
+#ch-ui { position: fixed; inset: 0; pointer-events: none; }
+#ch-ui > * { pointer-events: auto; }
+#ch-ui > .ch-layer--hud.is-on, #ch-ui > .ch-layer--touch.is-on { pointer-events: none; }
+#ch-ui { transition: opacity 0.35s ease; }
+/* During Verificar the HUD fades except the loop indicator, which is the point of that moment. */
+#ch-ui.ch-sweep > * { opacity: 0.0; transition: opacity 0.35s ease; pointer-events: none; }
+#ch-ui.ch-sweep .ch-loop, #ch-ui.ch-sweep > *:has(.ch-loop) { opacity: 1; }
+#ch-ui.ch-sweep * { pointer-events: none !important; }
+#ch-loading { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); bottom: max(16px, env(safe-area-inset-bottom, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); margin: 0; font-size: 14px; color: var(--ch-cream); }
+#ch-devhint { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); top: max(16px, env(safe-area-inset-top, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); margin: 0; font-size: 14px; color: var(--ch-cream); text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6); pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { #ch-flash { transition: none; } }
+</style>
+
+<canvas id="ch-view" aria-label="Vista del juego"></canvas>
+<div id="ch-flash"></div>
+<div id="ch-ui"></div>
+<p id="ch-loading">Cargando el loop…</p>
+
+<script id="chispa-core">
+/*__CHISPA_CORE__*/
+</script>
+<script id="chispa-audio">
+/*__CHISPA_AUDIO__*/
+</script>
+<script id="chispa-ui">
+/*__CHISPA_UI__*/
+</script>
+<script type="module">
+import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.module.min.js';
+
+/* Player-facing text of the render, all in one place. Stage names, hints and tips live in the core's STAGES data. */
+const TEXT = {
+  noWebGL: 'Este navegador no tiene WebGL, así que el juego no puede arrancar.',
+  noUI: 'Falta la parte de interfaz: pulsa cualquier tecla para jugar.',
+  tipError: 'Un error te devuelve al inicio. Rodéalo.',
+  tipFall: 'Mantén el salto para llegar más lejos.',
+  tipSprint: 'Este hueco pide carrera: mantén Shift o Rápido.',
+  tipContext: 'El contexto se agota: completa esos pasos de una sola pasada.',
+  tipHook: 'El hook dijo no: ese paso no está permitido. Busca otro camino.',
+  tipHookStory: (claim) => `El hook frenó una respuesta inventada: «${claim}». Sigue por los datos comprobados.`,
+  labelError: (claim) => `✗ «${claim}»`
+};
+
+const Core = window.ChispaCore;
+const { C, STAGES } = Core;
+const $ = (id) => document.getElementById(id);
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const isTouch = matchMedia('(pointer: coarse)').matches;
+
+/* ---------------- parts, guarded: the render runs even when audio or UI is missing ---------------- */
+function safe(obj, name, fallback) {
+  return (...args) => {
+    const fn = obj && obj[name];
+    if (typeof fn !== 'function') return fallback;
+    try { return fn.apply(obj, args); } catch (e) { console.warn(`[chispa] ${name} failed`, e); return fallback; }
+  };
+}
+const AudioPart = window.ChispaAudio || null;
+const UIPart = window.ChispaUI || null;
+const audio = {
+  unlock: safe(AudioPart, 'unlock'), setStage: safe(AudioPart, 'setStage'), handle: safe(AudioPart, 'handle'),
+  playMelody: safe(AudioPart, 'playMelody', 0), ui: safe(AudioPart, 'ui'), setPaused: safe(AudioPart, 'setPaused'),
+  setMuted: safe(AudioPart, 'setMuted'), isMuted: safe(AudioPart, 'isMuted', false),
+  setAmbient: safe(AudioPart, 'setAmbient'), isAmbient: safe(AudioPart, 'isAmbient', true)
+};
+const ui = {
+  init: safe(UIPart, 'init'), show: safe(UIPart, 'show'), hud: safe(UIPart, 'hud'),
+  input: safe(UIPart, 'input', null), record: safe(UIPart, 'record', null), progress: safe(UIPart, 'progress', null),
+  screen: safe(UIPart, 'screen', null), loop: safe(UIPart, 'loop'), prompt: safe(UIPart, 'prompt'), tip: safe(UIPart, 'tip'),
+  context: safe(UIPart, 'context'), anchor: safe(UIPart, 'anchor'), mission: safe(UIPart, 'mission'),
+  covers: safe(UIPart, 'covers', null), fly: safe(UIPart, 'fly'),
+  missionShown: safe(UIPart, 'missionShown', false), missionReopened: safe(UIPart, 'missionReopened', false),
+  look: safe(UIPart, 'look', null)
+};
+// Only call the UI when the value changes (prompt and loop are idempotent there, but this keeps calls rare).
+let shownPrompt = undefined, shownLoop = undefined;
+function setPrompt(name) { if (name !== shownPrompt) { shownPrompt = name; ui.prompt(name); } }
+function setLoop(phase) { if (phase !== shownLoop) { shownLoop = phase; ui.loop(phase); } }
+
+/* ---------------- renderer and scene ---------------- */
+const canvas = $('ch-view');
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+} catch (e) {
+  $('ch-loading').textContent = TEXT.noWebGL;
+  throw e;
+}
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isTouch ? 1.5 : 1.75));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+renderer.shadowMap.enabled = !isTouch;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+// Shared palette from CONTRACT-chispa.md, plus a few render-only tints derived from it.
+const COL = {
+  skyTop: new THREE.Color('#1d1a3f'), skyMid: new THREE.Color('#4a2a5e'), horizon: new THREE.Color('#ff7a59'), below: new THREE.Color('#c0607e'),
+  fog: new THREE.Color('#c27088'), sun: new THREE.Color('#ffcf8a'),
+  deckTop: new THREE.Color('#efe2cc'), deckSide: new THREE.Color('#c0674a'), keySleep: new THREE.Color('#fbf3e6'), keyWake: new THREE.Color('#ffb347'),
+  fade: new THREE.Color('#8fe3d8'), chord: new THREE.Color('#bdb2ff'), crack: new THREE.Color('#2a1f24'),
+  amber: new THREE.Color('#ffb347'), teal: new THREE.Color('#2ec4b6'), rose: new THREE.Color('#8c7ae6'), coral: new THREE.Color('#ff7a59'),
+  clawd: new THREE.Color('#d97757'), errorRed: new THREE.Color('#ff3d5a'),
+  cream: new THREE.Color('#fff3dc'), cloudLight: new THREE.Color('#ffbfa8'), cloudShadow: new THREE.Color('#7e4f8a')
+};
+scene.fog = new THREE.Fog(COL.fog, 40, 160);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 700);
+
+const sunDir = new THREE.Vector3(-0.45, 0.16, -1).normalize();
+scene.add(new THREE.HemisphereLight(0xb0a6f2, 0xff9a78, 1.45));
+const sun = new THREE.DirectionalLight(0xffc98f, 2.4);
+sun.castShadow = renderer.shadowMap.enabled;
+sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 16, bottom: -16, near: 1, far: 70 });
+sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.03;
+scene.add(sun); scene.add(sun.target);
+
+const TONE_END = `
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>`;
+
+// Sky dome
+const sky = new THREE.Mesh(new THREE.SphereGeometry(500, 32, 16), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, fog: false,
+  uniforms: { top: { value: COL.skyTop }, mid: { value: COL.skyMid }, horizon: { value: COL.horizon }, below: { value: COL.below }, sunCol: { value: COL.sun }, sunDir: { value: sunDir } },
+  vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position = p.xyww; }`,
+  fragmentShader: `uniform vec3 top, mid, horizon, below, sunCol, sunDir; varying vec3 vDir;
+    void main(){ float h = vDir.y;
+      vec3 c = mix(horizon, mid, smoothstep(0.0, 0.3, h));
+      c = mix(c, top, smoothstep(0.24, 0.8, h));
+      c = mix(c, below, smoothstep(0.0, -0.3, h));
+      float s = max(dot(normalize(vDir), sunDir), 0.0);
+      c += sunCol * (pow(s, 900.0) * 3.0 + pow(s, 40.0) * 0.5 + pow(s, 6.0) * 0.18);
+      gl_FragColor = vec4(c, 1.0);` + TONE_END + `}`
+}));
+sky.renderOrder = -10;
+scene.add(sky);
+
+// Sea of clouds: one large plane with drifting fbm.
+const cloudUniforms = { time: { value: 0 }, cLight: { value: COL.cloudLight }, cShadow: { value: COL.cloudShadow }, fogColor: { value: COL.fog }, camPos: { value: new THREE.Vector3() } };
+const cloudSea = new THREE.Mesh(new THREE.PlaneGeometry(900, 900, 1, 1), new THREE.ShaderMaterial({
+  uniforms: cloudUniforms, fog: false,
+  vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+  fragmentShader: `uniform float time; uniform vec3 cLight, cShadow, fogColor, camPos; varying vec3 vW;
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float noise(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+      return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y); }
+    float fbm(vec2 p){ float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++){ v += a * noise(p); p = p * 2.03 + vec2(1.7, 9.2); a *= 0.5; } return v; }
+    void main(){
+      vec2 p = vW.xz * 0.03 + vec2(time * 0.010, time * 0.004);
+      float n = fbm(p) * 0.75 + fbm(p * 2.6 - vec2(time * 0.012, 0.0)) * 0.35;
+      float m = smoothstep(0.38, 0.82, n);
+      vec3 c = mix(cShadow, cLight, m);
+      c += vec3(1.0, 0.75, 0.55) * pow(m, 4.0) * 0.25;
+      float d = length(vW.xz - camPos.xz);
+      c = mix(c, fogColor, smoothstep(30.0, 230.0, d));
+      gl_FragColor = vec4(c, 1.0);` + TONE_END + `}`
+}));
+cloudSea.rotation.x = -Math.PI / 2;
+scene.add(cloudSea);
+
+// Puffy cloud clusters (one instanced draw) for depth around and under the stage.
+const PUFFS = 70;
+const puffs = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 2), new THREE.MeshLambertMaterial({ color: 0xffc9b8, emissive: 0x5e3462, emissiveIntensity: 0.45 }), PUFFS);
+scene.add(puffs);
+
+// Floating motes drifting in a shader.
+function makeMotes(n) {
+  const g = new THREE.BufferGeometry();
+  const pos = new Float32Array(n * 3), ph = new Float32Array(n);
+  for (let i = 0; i < n; i++) { pos[i * 3] = (Math.random() - 0.5) * 60; pos[i * 3 + 1] = Math.random() * 10 - 2; pos[i * 3 + 2] = (Math.random() - 0.5) * 70; ph[i] = Math.random() * 6.28; }
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('phase', new THREE.BufferAttribute(ph, 1));
+  const m = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
+    uniforms: { time: { value: 0 }, scale: { value: 300 }, col: { value: new THREE.Color('#ffcf7a') } },
+    vertexShader: `attribute float phase; uniform float time, scale; varying float vA;
+      void main(){ vec3 p = position + vec3(sin(time * 0.3 + phase) * 1.2, sin(time * 0.5 + phase * 2.0) * 0.6, cos(time * 0.25 + phase) * 1.2);
+        vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_PointSize = scale * 0.09 / -mv.z; gl_Position = projectionMatrix * mv;
+        vA = 0.35 + 0.35 * sin(time * 1.7 + phase * 3.0); }`,
+    fragmentShader: `uniform vec3 col; varying float vA; void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d) * vA; gl_FragColor = vec4(col, a);
+      #include <colorspace_fragment>
+    }`
+  });
+  const pts = new THREE.Points(g, m); pts.frustumCulled = false;
+  return pts;
+}
+const motes = makeMotes(reducedMotion ? 40 : 110);
+scene.add(motes);
+
+/* ---------------- procedural textures (no image files) ---------------- */
+function canvasTex(size, draw, color = true) {
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  draw(c.getContext('2d'), size);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  if (color) t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+function rnd(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
+const panelTex = canvasTex(256, (g, S) => {
+  // Floor tiles: soft cream panels with thin seams, read as clean platforms.
+  g.fillStyle = '#f4ece0'; g.fillRect(0, 0, S, S);
+  const r = rnd(7);
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+    const v = 236 + Math.floor(r() * 14);
+    g.fillStyle = `rgb(${v},${v - 6},${v - 16})`; g.fillRect(i * 64 + 2, j * 64 + 2, 60, 60);
+  }
+  g.strokeStyle = 'rgba(150,95,70,0.35)'; g.lineWidth = 2;
+  for (let k = 0; k <= 4; k++) { g.beginPath(); g.moveTo(k * 64, 0); g.lineTo(k * 64, S); g.stroke(); g.beginPath(); g.moveTo(0, k * 64); g.lineTo(S, k * 64); g.stroke(); }
+});
+const stepTex = canvasTex(128, (g, S) => {
+  // A step panel: bright inner plate with a rounded border, so it reads as a target.
+  g.fillStyle = '#d9c7ad'; g.fillRect(0, 0, S, S);
+  g.fillStyle = '#ffffff';
+  const rr = 18, m = 10;
+  g.beginPath(); g.moveTo(m + rr, m); g.arcTo(S - m, m, S - m, S - m, rr); g.arcTo(S - m, S - m, m, S - m, rr); g.arcTo(m, S - m, m, m, rr); g.arcTo(m, m, S - m, m, rr); g.closePath(); g.fill();
+  g.strokeStyle = 'rgba(217,119,87,0.55)'; g.lineWidth = 4; g.stroke();
+});
+stepTex.wrapS = stepTex.wrapT = THREE.ClampToEdgeWrapping;
+const crateTex = canvasTex(128, (g, S) => {
+  // Tool box: terracotta case, darker lid band, two latches.
+  g.fillStyle = '#c4553a'; g.fillRect(0, 0, S, S);
+  g.fillStyle = '#9c3f2a'; g.fillRect(0, 0, S, 30);
+  g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(0, 30, S, 4);
+  g.fillStyle = '#f2e3c9'; g.fillRect(24, 22, 16, 18); g.fillRect(S - 40, 22, 16, 18);
+  g.strokeStyle = 'rgba(60,20,10,0.5)'; g.lineWidth = 4; g.strokeRect(2, 2, S - 4, S - 4);
+  g.fillStyle = '#f2e3c9'; g.fillRect(S / 2 - 22, 70, 44, 26);
+  g.fillStyle = '#c4553a'; g.font = 'bold 22px sans-serif'; g.textAlign = 'center'; g.fillText('</>', S / 2, 91);
+});
+const crackColTex = canvasTex(256, (g, S) => {
+  // Error panel: dark glass with scanlines.
+  g.fillStyle = '#2b2030'; g.fillRect(0, 0, S, S);
+  for (let y = 0; y < S; y += 4) { g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(0, y, S, 2); }
+});
+const crackEmTex = canvasTex(256, (g, S) => {
+  // Glitch: displaced bright bars and a warning cross, red and magenta.
+  g.fillStyle = '#000'; g.fillRect(0, 0, S, S);
+  const r = rnd(23);
+  for (let k = 0; k < 26; k++) {
+    g.fillStyle = k % 3 ? '#ff2e55' : k % 2 ? '#ff6ad5' : '#ff9a3a';
+    g.fillRect(r() * S, r() * S, 10 + r() * 70, 2 + r() * 7);
+  }
+  g.strokeStyle = '#ff3d5a'; g.lineWidth = 10; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(S * 0.36, S * 0.36); g.lineTo(S * 0.64, S * 0.64); g.moveTo(S * 0.64, S * 0.36); g.lineTo(S * 0.36, S * 0.64); g.stroke();
+});
+function radialTex(inner, outer) {
+  const t = canvasTex(128, (g, S) => {
+    const gr = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    gr.addColorStop(0, inner); gr.addColorStop(0.25, inner.replace(/[\d.]+\)$/, '0.45)')); gr.addColorStop(1, outer);
+    g.fillStyle = gr; g.fillRect(0, 0, S, S);
+  });
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+const glowTex = radialTex('rgba(255,255,255,1)', 'rgba(255,255,255,0)');
+const blobTex = radialTex('rgba(20,8,30,0.6)', 'rgba(20,8,30,0)');
+
+/* ---------------- geometry helpers ---------------- */
+// Box with world-scaled UVs so the grain keeps its size on every platform.
+function boxData(min, max, center, uvScale = 0.5, top = null, side = null) {
+  const pos = [], nor = [], uv = [], idx = [], col = [];
+  const [x0, y0, z0] = min, [x1, y1, z1] = max;
+  const cx = center ? center[0] : 0, cy = center ? center[1] : 0, cz = center ? center[2] : 0;
+  const faces = [
+    { n: [1, 0, 0], v: [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]], u: (p) => [p[2], p[1]] },
+    { n: [-1, 0, 0], v: [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]], u: (p) => [p[2], p[1]] },
+    { n: [0, 1, 0], v: [[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]], u: (p) => [p[0], p[2]] },
+    { n: [0, -1, 0], v: [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]], u: (p) => [p[0], p[2]] },
+    { n: [0, 0, 1], v: [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]], u: (p) => [p[0], p[1]] },
+    { n: [0, 0, -1], v: [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]], u: (p) => [p[0], p[1]] }
+  ];
+  faces.forEach((f) => {
+    const base = pos.length / 3;
+    const c = f.n[1] > 0 ? top : side;
+    f.v.forEach((p) => { pos.push(p[0] - cx, p[1] - cy, p[2] - cz); nor.push(...f.n); const t = f.u(p); uv.push(t[0] * uvScale, t[1] * uvScale); if (c) col.push(c.r, c.g, c.b); });
+    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  });
+  return { pos, nor, uv, idx, col };
+}
+function geoFrom(parts) {
+  const pos = [], nor = [], uv = [], idx = [], col = [];
+  parts.forEach((p) => { const b = pos.length / 3; pos.push(...p.pos); nor.push(...p.nor); uv.push(...p.uv); col.push(...p.col); p.idx.forEach((i) => idx.push(i + b)); });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  if (col.length === pos.length) g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
+  g.computeBoundingSphere();
+  return g;
+}
+
+/* ---------------- shared materials ---------------- */
+const deckMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: panelTex, vertexColors: true, roughness: 0.85 });
+const crackMat = new THREE.MeshStandardMaterial({ color: 0xb8a8c0, map: crackColTex, emissive: 0xff3d5a, emissiveMap: crackEmTex, emissiveIntensity: 1.4, roughness: 0.5 });
+const crateMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: crateTex, roughness: 0.75 });
+const handleMat = new THREE.MeshStandardMaterial({ color: 0x3a2a30, roughness: 0.5, metalness: 0.3 });
+const handleGeo = new THREE.TorusGeometry(0.2, 0.045, 8, 16, Math.PI);
+const ringGeo = new THREE.RingGeometry(0.62, 0.78, 48).rotateX(-Math.PI / 2);
+const beaconGeo = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0);
+const beadGeo = new THREE.SphereGeometry(0.09, 10, 8);
+const beaconMatProto = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, fog: false, side: THREE.DoubleSide,
+  uniforms: { col: { value: COL.amber.clone() }, strength: { value: 0.4 } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `uniform vec3 col; uniform float strength; varying vec2 vUv;
+    void main(){ float edge = 1.0 - abs(vUv.x - 0.5) * 2.0; float a = pow(edge, 2.2) * pow(1.0 - vUv.y, 1.6) * strength;
+      gl_FragColor = vec4(col, a);
+      #include <colorspace_fragment>
+    }`
+});
+const timerMatProto = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, toneMapped: false,
+  uniforms: { progress: { value: 1 }, col: { value: COL.teal.clone() }, alpha: { value: 1 } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `uniform float progress, alpha; uniform vec3 col; varying vec2 vUv;
+    void main(){ vec2 p = vUv - 0.5; float r = length(p); if (r > 0.5 || r < 0.38) discard;
+      float a = atan(p.x, p.y) / 6.28318 + 0.5; float on = step(a, progress);
+      gl_FragColor = vec4(mix(col * 0.25, col, on), alpha * (0.35 + 0.65 * on));
+      #include <colorspace_fragment>
+    }`
+});
+
+/* ---------------- story labels: readable without stopping ---------------- */
+// A flat pill that always faces the camera. It has a world size, so far labels shrink and do not
+// pile up; portrait screens (camera farther away) get bigger ones. See labelScale().
+const LABEL_STYLE = {
+  error: { bg: 'rgba(42,31,36,0.92)', border: '#ff3d5a', ink: '#ffd7dd' },
+  tool: { bg: 'rgba(255,248,239,0.95)', border: '#c0674a', ink: '#8f3f27' },
+  check: { bg: 'rgba(255,248,239,0.95)', border: '#3faa6b', ink: '#1f6b42' }
+};
+function labelSprite(text, kind) {
+  const st = LABEL_STYLE[kind] || LABEL_STYLE.tool, fs = 30, padX = 16, h = 46;
+  const font = `700 ${fs}px "Atkinson Hyperlegible Next", "Segoe UI", system-ui, sans-serif`;
+  const c = document.createElement('canvas'), g = c.getContext('2d');
+  g.font = font;
+  const w = Math.ceil(g.measureText(text).width) + padX * 2;
+  c.width = w; c.height = h;
+  g.font = font;
+  const r = 14;
+  g.beginPath(); g.moveTo(r + 2, 2); g.arcTo(w - 2, 2, w - 2, h - 2, r); g.arcTo(w - 2, h - 2, 2, h - 2, r); g.arcTo(2, h - 2, 2, 2, r); g.arcTo(2, 2, w - 2, 2, r); g.closePath();
+  g.fillStyle = st.bg; g.fill(); g.lineWidth = 3; g.strokeStyle = st.border; g.stroke();
+  g.fillStyle = st.ink; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, w / 2, h / 2 + 1);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false, toneMapped: false, fog: false }));
+  sp.renderOrder = 20; sp.material.opacity = 0; sp.visible = false;
+  sp.userData.ownMat = true; sp.userData.tex = tex; sp.userData.ratio = w / h;
+  labelScale(sp);
+  return sp;
+}
+// Each frame, labels are placed nearest first: a label shows only if it is whole on screen, close
+// enough to read, clear of every label already placed and clear of the HUD panels (board, mission
+// card, top bar). Everything else fades out, so a label is read whole or not at all.
+const LABEL_MAX_D = 26, LABEL_MIN_PX = 13, LABEL_MAX_PX = 30, LABEL_GAP = 4;
+const labelP = new THREE.Vector3();
+function rectsHit(a, b, m) { return a.l < b.r + m && a.r > b.l - m && a.t < b.b + m && a.b > b.t - m; }
+function placeLabels(dt, on) {
+  const all = view.labels.children.concat(view.crateLabels);
+  const W = window.innerWidth, H = window.innerHeight, tanH = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+  const covers = on ? (ui.covers() || []) : [];
+  const items = [];
+  for (const sp of all) {
+    labelScale(sp);
+    sp.getWorldPosition(labelP);
+    const d = labelP.distanceTo(camera.position);
+    labelP.project(camera);
+    let hpx = sp.scale.y / (2 * d * tanH) * H;
+    // a label right next to the camera would be huge: cap its size on screen
+    if (hpx > LABEL_MAX_PX) { sp.scale.multiplyScalar(LABEL_MAX_PX / hpx); hpx = LABEL_MAX_PX; }
+    const wpx = hpx * sp.userData.ratio;
+    const x = (labelP.x + 1) / 2 * W, y = (1 - labelP.y) / 2 * H;
+    items.push({ sp, d, ok: on && labelP.z < 1 && d < LABEL_MAX_D && hpx >= LABEL_MIN_PX, r: { l: x - wpx / 2, t: y - hpx / 2, r: x + wpx / 2, b: y + hpx / 2 } });
+  }
+  items.sort((a, b) => a.d - b.d);
+  const placed = [];
+  for (const it of items) {
+    let show = it.ok && it.r.l >= 0 && it.r.t >= 0 && it.r.r <= W && it.r.b <= H;
+    if (show) show = !covers.some((c) => rectsHit(it.r, c, 2)) && !placed.some((p) => rectsHit(it.r, p, LABEL_GAP));
+    if (show) placed.push(it.r);
+    const m = it.sp.material, target = show ? 1 : 0;
+    // Fade in, but leave at once: a hidden label never lingers half-covered.
+    m.opacity = target ? Math.min(1, m.opacity + dt * 8) : 0;
+    it.sp.visible = m.opacity > 0.01;
+  }
+  view.labelRects = placed;
+}
+function labelScale(sp) {
+  const H = camera.aspect < 0.8 ? 0.82 : camera.aspect < 1.2 ? 0.6 : 0.5;
+  if (sp.scale.y !== H) sp.scale.set(H * sp.userData.ratio, H, 1);
+}
+
+/* ---------------- stage view ---------------- */
+let view = null;
+function disposeView() {
+  if (!view) return;
+  scene.remove(view.group);
+  view.group.traverse((o) => {
+    if (o.geometry && o.geometry !== handleGeo && o.geometry !== ringGeo && o.geometry !== beaconGeo && o.geometry !== beadGeo) o.geometry.dispose();
+    if (o.material && o.userData.ownMat) o.material.dispose();
+    if (o.userData.tex) o.userData.tex.dispose();
+  });
+  view = null;
+}
+function buildView(world) {
+  disposeView();
+  const group = new THREE.Group();
+  const decks = new THREE.Mesh(geoFrom(world.boxes.filter((b) => b.kind === 'solid').map((b) => boxData(b.min, b.max, null, 0.5, COL.deckTop, COL.deckSide))), deckMat);
+  decks.castShadow = decks.receiveShadow = true;
+  group.add(decks);
+  const crackParts = world.boxes.filter((b) => b.kind === 'crack').map((b) => boxData(b.min, b.max, null, 0.6));
+  let cracks = null;
+  if (crackParts.length) { cracks = new THREE.Mesh(geoFrom(crackParts), crackMat); cracks.castShadow = cracks.receiveShadow = true; group.add(cracks); }
+  const crackGlows = world.boxes.filter((b) => b.kind === 'crack').map((b) => {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: COL.errorRed, transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+    sp.position.set((b.min[0] + b.max[0]) / 2, b.max[1] + 0.35, (b.min[2] + b.max[2]) / 2);
+    sp.scale.set((b.max[0] - b.min[0]) * 1.5, 1.4, 1); sp.userData.ownMat = true; sp.userData.box = b;
+    group.add(sp); return sp;
+  });
+  const keys = world.keys.map((k) => {
+    const b = k.box, c = [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2];
+    const base = k.type === 'f' ? COL.fade : k.type === 'c' ? COL.chord : COL.keySleep;
+    const mat = new THREE.MeshStandardMaterial({ color: base.clone(), map: stepTex, roughness: 0.4, emissive: COL.keyWake.clone(), emissiveIntensity: 0 });
+    const vmin = [b.min[0] + 0.05, b.min[1], b.min[2] + 0.05], vmax = [b.max[0] - 0.05, b.max[1] + 0.03, b.max[2] - 0.05];
+    const geo = geoFrom([boxData(vmin, vmax, c, 0.5)]);
+    // One panel texture stretched over the top so every step shows its border.
+    const uvA = geo.attributes.uv, nA = geo.attributes.normal, pA = geo.attributes.position;
+    for (let i = 0; i < uvA.count; i++) if (nA.getY(i) > 0.5) uvA.setXY(i, (pA.getX(i) - (vmin[0] - c[0])) / (vmax[0] - vmin[0]), (pA.getZ(i) - (vmin[2] - c[2])) / (vmax[2] - vmin[2])); else uvA.setXY(i, 0.02, 0.02);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(c[0], c[1], c[2]); mesh.castShadow = mesh.receiveShadow = true; mesh.userData.ownMat = true;
+    group.add(mesh);
+    const sx = b.max[0] - b.min[0], sz = b.max[2] - b.min[2];
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: COL.amber, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+    glow.position.set(c[0], b.max[1] + 0.4, c[2]); glow.scale.set(sx * 1.6, Math.max(1.4, sz) * 1.1, 1); glow.userData.ownMat = true;
+    group.add(glow);
+    let timer = null;
+    if (k.type === 'f' || k.type === 'c') {
+      const tm = timerMatProto.clone(); tm.uniforms.col.value = (k.type === 'f' ? COL.teal : COL.rose).clone();
+      timer = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), tm);
+      timer.scale.set(1.1, 1.1, 1);
+      timer.position.set(c[0], b.max[1] + 1.25, c[2]); timer.userData.ownMat = true; timer.visible = false; timer.renderOrder = 4;
+      group.add(timer);
+    }
+    const beacon = new THREE.Mesh(beaconGeo, beaconMatProto.clone());
+    beacon.material.uniforms.col.value = (k.type === 'f' ? COL.teal : k.type === 'c' ? COL.rose : COL.amber).clone();
+    beacon.position.set(c[0], b.max[1] + 0.05, c[2]); beacon.userData.ownMat = true; beacon.renderOrder = 3;
+    beacon.userData.w = Math.max(0.9, Math.min(sx, sz) * 0.7);
+    group.add(beacon);
+    return { k, mesh, mat, glow, timer, beacon, base, amt: 0, dip: 0, dipV: 0, y: c[1] };
+  });
+  // Chord pairs: an arched dashed thread between partners.
+  const groups = {};
+  world.keys.forEach((k) => { if (k.type === 'c') (groups[k.group] = groups[k.group] || []).push(k); });
+  const threads = [];
+  Object.values(groups).forEach((ks) => {
+    if (ks.length < 2) return;
+    const a = ks[0].box, b = ks[1].box;
+    const A = new THREE.Vector3((a.min[0] + a.max[0]) / 2, a.max[1] + 0.25, (a.min[2] + a.max[2]) / 2);
+    const B = new THREE.Vector3((b.min[0] + b.max[0]) / 2, b.max[1] + 0.25, (b.min[2] + b.max[2]) / 2);
+    const pts = [];
+    for (let i = 0; i <= 24; i++) { const t = i / 24; const p = A.clone().lerp(B, t); p.y += Math.sin(t * Math.PI) * 1.2; pts.push(p); }
+    const line = new THREE.InstancedMesh(beadGeo, new THREE.MeshBasicMaterial({ color: COL.rose, transparent: true, opacity: 0.7, toneMapped: false }), pts.length);
+    const m4b = new THREE.Matrix4();
+    pts.forEach((p, i) => { m4b.makeTranslation(p.x, p.y, p.z); line.setMatrixAt(i, m4b); });
+    line.userData.ownMat = true;
+    group.add(line); threads.push({ line, keys: ks });
+  });
+  const story = world.stage.story || null;
+  const labels = new THREE.Group(), crateLabels = [];
+  const crates = world.crates.map((c, i) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), crateMat); m.castShadow = m.receiveShadow = true;
+    const h = new THREE.Mesh(handleGeo, handleMat); h.position.y = 0.5; m.add(h);
+    const t = story && story.tools && story.tools[i];
+    if (t && t[2]) { const lb = labelSprite(t[2], 'tool'); lb.position.y = 1.05; m.add(lb); crateLabels.push(lb); }
+    group.add(m); return m;
+  });
+  if (story) {
+    world.boxes.filter((b) => b.kind === 'crack').forEach((b, i) => {
+      const e = story.errors && story.errors[i];
+      if (!e || !e[1]) return;
+      const lb = labelSprite(TEXT.labelError(e[1]), 'error');
+      lb.position.set((b.min[0] + b.max[0]) / 2, b.max[1] + 0.95, (b.min[2] + b.max[2]) / 2);
+      labels.add(lb);
+    });
+    world.keys.forEach((k, i) => {
+      const p = story.steps && story.steps[i];
+      if (!p || !p[2]) return;
+      const b = k.box, lb = labelSprite(p[2], 'check');
+      lb.position.set((b.min[0] + b.max[0]) / 2, b.max[1] + 1.7, (b.min[2] + b.max[2]) / 2);
+      labels.add(lb);
+    });
+  }
+  group.add(labels);
+  scene.add(group);
+  // Scatter cloud puffs around this stage.
+  const B = world.bounds, r = rnd(world.index * 97 + 5), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), ps = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+  const cx = (B.min[0] + B.max[0]) / 2, cz = (B.min[2] + B.max[2]) / 2, ex = (B.max[0] - B.min[0]) / 2 + 26, ez = (B.max[2] - B.min[2]) / 2 + 26;
+  for (let i = 0; i < PUFFS; i++) {
+    const near = i < 30;
+    const s = 1.2 + r() * (near ? 2.2 : 4.5);
+    ps.set(cx + (r() - 0.5) * 2 * (near ? ex * 0.7 : ex * 2.4), world.killY + 3.2 - s * (0.15 + r() * 0.35), cz + (r() - 0.5) * 2 * (near ? ez * 0.8 : ez * 2.2));
+    sc.set(s * (1.1 + r() * 0.6), s * (0.75 + r() * 0.3), s * (1 + r() * 0.4)); q.setFromAxisAngle(up, r() * 6);
+    m4.compose(ps, q, sc); puffs.setMatrixAt(i, m4);
+  }
+  puffs.instanceMatrix.needsUpdate = true;
+  cloudSea.position.y = world.killY + 3.2;
+  motes.position.set(cx, B.max[1] - 2, cz);
+  view = { group, keys, crates, cracks, threads, crackGlows, labels, crateLabels };
+}
+function rebindView(world) { if (view) view.keys.forEach((kv, j) => { kv.k = world.keys[j]; }); }
+
+/* ---------------- Chispa, the lantern spirit ---------------- */
+const chispa = new THREE.Group();
+const body = new THREE.Group();
+chispa.add(body);
+const clawdMat = new THREE.MeshStandardMaterial({ color: COL.clawd, emissive: 0xb0482a, emissiveIntensity: 0.35, roughness: 0.75, flatShading: true });
+const clawdDark = new THREE.MeshStandardMaterial({ color: 0xb85d40, emissive: 0x7a2e14, emissiveIntensity: 0.25, roughness: 0.8, flatShading: true });
+const eyeMat = new THREE.MeshBasicMaterial({ color: 0x1c1418 });
+function vox(w, h, d, x, y, z, mat) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.castShadow = true; body.add(m); return m; }
+const torso = vox(0.78, 0.44, 0.52, 0, 0.03, 0, clawdMat);
+vox(0.12, 0.13, 0.2, -0.45, 0.0, 0, clawdMat);
+vox(0.12, 0.13, 0.2, 0.45, 0.0, 0, clawdMat);
+const legs = [-0.28, -0.1, 0.1, 0.28].map((x) => vox(0.1, 0.16, 0.12, x, -0.27, 0, clawdDark));
+[-0.16, 0.16].forEach((x) => vox(0.07, 0.15, 0.02, x, 0.08, -0.265, eyeMat));
+const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xff9a6a, transparent: true, opacity: 0.4, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+halo.scale.set(2.0, 2.0, 1); chispa.add(halo);
+const lamp = new THREE.PointLight(0xffa070, 8, 8, 1.6);
+lamp.position.y = 0.2; chispa.add(lamp);
+scene.add(chispa);
+const accGroup = new THREE.Group();
+body.add(accGroup);
+let lookName = 'Clawd';
+function applyLook(L) {
+  const D = Core.CLAWD;
+  if (!D) return;
+  L = L || {};
+  const col = D.colors.find((c) => c.id === L.color) || D.colors[0];
+  clawdMat.color.set(col.body); clawdMat.emissive.set(col.emissive);
+  clawdDark.color.set(col.dark); clawdDark.emissive.set(col.darkEmissive);
+  const acc = D.accessories.find((a) => a.id === L.acc) || D.accessories[0];
+  if (accGroup.userData.id !== acc.id) {
+    accGroup.children.slice().forEach((m) => { accGroup.remove(m); m.geometry.dispose(); m.material.dispose(); });
+    for (const b of acc.boxes) {
+      const part = b[6], c = acc.parts[part] || '#ffffff';
+      const mat = new THREE.MeshStandardMaterial({ color: c, roughness: 0.7, flatShading: true });
+      if (part === 'lens') { mat.transparent = true; mat.opacity = 0.6; }
+      if (part === 'bulb' || part === 'gem') { mat.emissive.set(c); mat.emissiveIntensity = 0.6; }
+      const m = new THREE.Mesh(new THREE.BoxGeometry(b[0], b[1], b[2]), mat);
+      m.position.set(b[3], b[4], b[5]); m.castShadow = true;
+      accGroup.add(m);
+    }
+    accGroup.userData.id = acc.id;
+  }
+  lookName = L.name || 'Clawd';
+}
+const blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false, toneMapped: false }));
+blob.renderOrder = 2; scene.add(blob);
+
+/* ---------------- particles ---------------- */
+const MAXP = reducedMotion ? 160 : 420;
+const pGeo = new THREE.BufferGeometry();
+const pPos = new Float32Array(MAXP * 3), pCol = new Float32Array(MAXP * 3), pSize = new Float32Array(MAXP), pAlpha = new Float32Array(MAXP);
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+pGeo.setAttribute('pcol', new THREE.BufferAttribute(pCol, 3));
+pGeo.setAttribute('size', new THREE.BufferAttribute(pSize, 1));
+pGeo.setAttribute('alpha', new THREE.BufferAttribute(pAlpha, 1));
+const pMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
+  uniforms: { scale: { value: 400 } },
+  vertexShader: `attribute float size; attribute float alpha; attribute vec3 pcol; uniform float scale; varying vec3 vC; varying float vA;
+    void main(){ vC = pcol; vA = alpha; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = size * scale / -mv.z; gl_Position = projectionMatrix * mv; }`,
+  fragmentShader: `varying vec3 vC; varying float vA; void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.05, d) * vA; if (a < 0.01) discard; gl_FragColor = vec4(vC, a);
+    #include <colorspace_fragment>
+  }`
+});
+const particles = new THREE.Points(pGeo, pMat);
+particles.frustumCulled = false;
+scene.add(particles);
+const parts = [];
+for (let i = 0; i < MAXP; i++) parts.push({ life: 0 });
+let pCursor = 0;
+function emit(x, y, z, o) {
+  const p = parts[pCursor]; pCursor = (pCursor + 1) % MAXP;
+  p.x = x; p.y = y; p.z = z;
+  p.vx = o.vx || 0; p.vy = o.vy || 0; p.vz = o.vz || 0;
+  p.life = p.max = o.life || 0.6; p.size = o.size || 0.1; p.g = o.g || 0; p.drag = o.drag || 1.5;
+  const c = o.col || COL.amber; p.r = c.r; p.gc = c.g; p.b = c.b;
+}
+function burst(x, y, z, n, o) {
+  n = reducedMotion ? Math.ceil(n / 3) : n;
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, s = (o.speed || 3) * (0.4 + Math.random() * 0.6), up = o.up != null ? o.up : 0.5;
+    emit(x, y, z, { vx: Math.cos(a) * s, vz: Math.sin(a) * s, vy: (Math.random() * up + (o.lift || 0)) * s, life: (o.life || 0.6) * (0.6 + Math.random() * 0.6), size: (o.size || 0.12) * (0.6 + Math.random() * 0.8), g: o.g || 0, drag: o.drag, col: o.col });
+  }
+}
+function updateParticles(dt) {
+  for (let i = 0; i < MAXP; i++) {
+    const p = parts[i];
+    if (p.life <= 0) { pAlpha[i] = 0; continue; }
+    p.life -= dt;
+    const k = Math.exp(-p.drag * dt);
+    p.vx *= k; p.vz *= k; p.vy = p.vy * k - p.g * dt;
+    p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+    const t = Math.max(0, p.life / p.max);
+    pPos[i * 3] = p.x; pPos[i * 3 + 1] = p.y; pPos[i * 3 + 2] = p.z;
+    pCol[i * 3] = p.r; pCol[i * 3 + 1] = p.gc; pCol[i * 3 + 2] = p.b;
+    pSize[i] = p.size * (0.4 + 0.6 * t); pAlpha[i] = t;
+  }
+  for (const a of ['position', 'pcol', 'size', 'alpha']) pGeo.attributes[a].needsUpdate = true;
+}
+// Rising light rings on wake.
+const rings = [];
+for (let i = 0; i < 10; i++) {
+  const m = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: COL.amber, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false }));
+  m.visible = false; scene.add(m); rings.push({ m, t: 0 });
+}
+let ringCursor = 0;
+function spawnRing(x, y, z, size, col) {
+  const r = rings[ringCursor]; ringCursor = (ringCursor + 1) % rings.length;
+  r.t = 0; r.size = size; r.y0 = y; r.m.position.set(x, y, z); r.m.material.color.copy(col || COL.amber); r.m.visible = true;
+}
+function updateRings(dt) {
+  rings.forEach((r) => {
+    if (!r.m.visible) return;
+    r.t += dt;
+    const k = r.t / 0.9;
+    if (k >= 1) { r.m.visible = false; return; }
+    const s = r.size * (0.7 + k * 1.6);
+    r.m.scale.set(s, 1, s); r.m.position.y = r.y0 + k * 1.3; r.m.material.opacity = (1 - k) * 0.9;
+  });
+}
+
+/* ---------------- state machine: title, select, playing, paused, complete, finale ---------------- */
+// tr: the transcript of papers (the context board), fed from the same events as the render.
+// anchor: the chapter's anchor phrase, shown before Observar when a chapter starts.
+const state = { mode: 'boot', stage: 0, phase: null, world: null, sweep: null, intro: null, tr: null, anchor: null, mission: false };
+const taught = { move: false, jump: false, sprint: false, push: false, restart: false, skip: false, hook: false };
+let lastStarted = -1;
+let hookTipShown = false;   // the story line about the refused made-up answer, once per task start
+const newPapers = [];       // indexes of papers added this frame; they fly from where they happened
+let reopenMoveT = 0;        // seconds of movement while a reopened mission card is up
+const flyP = new THREE.Vector3();
+// Where a paper happened, in the world: its step, its crate, its error panel, where Clawd fell, or Clawd.
+function paperPoint(w, p) {
+  if (p.key != null && w.keys[p.key]) { const b = w.keys[p.key].box; return flyP.set((b.min[0] + b.max[0]) / 2, b.max[1] + 0.3, (b.min[2] + b.max[2]) / 2); }
+  if (p.tool != null && w.crates[p.tool]) { const c = w.crates[p.tool].p; return flyP.set(c[0], c[1] + 0.7, c[2]); }
+  if (p.crack != null) {
+    const b = w.boxes.filter((x) => x.kind === 'crack')[p.crack];
+    if (b) return flyP.set((b.min[0] + b.max[0]) / 2, b.max[1] + 0.3, (b.min[2] + b.max[2]) / 2);
+  }
+  if (p.err === 'fall') return flyP.set(lastGround[0], lastGround[1] + 0.3, lastGround[2]);
+  return flyP.set(w.player.p[0], w.player.p[1] + 0.6, w.player.p[2]);
+}
+// A result (with its call), a subagent call or the final answer is a moment: it is read next to
+// the action and then travels to the context panel (ChispaUI.fly).
+function flyPapers(w) {
+  if (!state.tr || !newPapers.length) { newPapers.length = 0; return; }
+  const P = state.tr.papers;
+  for (const i of newPapers) {
+    const p = P[i];
+    if (!p || !(p.type === 'result' || p.type === 'assistant' || (p.type === 'call' && p.sub))) continue;
+    const c = p.type === 'result' ? P.find((q) => q.type === 'call' && q.id === p.id) : null;
+    paperPoint(w, p).project(camera);
+    const x = (flyP.x + 1) / 2 * window.innerWidth, y = (1 - flyP.y) / 2 * window.innerHeight;
+    ui.fly({ type: p.type, id: p.id, text: p.text, call: c ? c.text : null, err: p.err || null, sub: !!p.sub }, x, y);
+  }
+  newPapers.length = 0;
+}
+const ANCHOR_T = 3.6;
+function chapterStarts(i) { return i === 0 || STAGES[i].chapter !== STAGES[i - 1].chapter; }
+function endAnchor() {
+  if (!state.anchor) return;
+  state.anchor = null;
+  ui.anchor(null);
+}
+const reteach = new Set();             // prompts brought back after three failures at the same spot
+let deathSpots = [];                   // per stage: [{ x, z, n, cause }]
+let stallT = 0, nudgeT = 0, sprintHeldT = 0;
+let titleWorld = null;
+
+function backdrop(index) {
+  // Title and menus render a stage behind them with most keys lit.
+  titleWorld = Core.makeWorld(index);
+  titleWorld.keys.forEach((k, i) => { if (i % 3 !== 1) k.awake = true; });
+  state.world = titleWorld; buildView(titleWorld); resetInterp();
+}
+function endIntro() {
+  if (!state.intro) return;
+  state.intro = null;
+  if (!taught.skip) taught.skip = true;
+  camInit = true; // keep blending from wherever the intro camera is
+}
+function showTitle() {
+  setPrompt(null); setLoop(null);
+  $('ch-ui').classList.remove('ch-sweep'); // leaving during the end-of-task sweep must not leave the UI untouchable
+  state.mode = 'title'; state.sweep = null; state.intro = null;
+  if (state.world !== titleWorld) backdrop(9);
+  audio.setPaused(false);
+  ui.show('title');
+}
+function showSelect() {
+  setPrompt(null); setLoop(null);
+  $('ch-ui').classList.remove('ch-sweep');
+  state.mode = 'select'; state.sweep = null; state.intro = null;
+  if (state.world !== titleWorld) backdrop(9);
+  audio.setPaused(false);
+  ui.show('select');
+}
+function startStage(i) {
+  i = Math.max(0, Math.min(STAGES.length - 1, i | 0));
+  $('ch-ui').classList.remove('ch-sweep');
+  audio.unlock();
+  state.stage = i; state.sweep = null;
+  state.world = Core.makeWorld(i);
+  state.tr = Core.makeTranscript ? Core.makeTranscript(state.world, { name: lookName }) : null;
+  newPapers.length = 0;
+  buildView(state.world);
+  resetInterp();
+  audio.setStage(STAGES[i]);
+  audio.setPaused(false);
+  state.mode = 'playing'; state.phase = null;
+  deathSpots = []; stallT = 0; nudgeT = 0;
+  // Observar: a short look over the whole task before control starts. Shorter on a task already done.
+  const prog = ui.progress();
+  const cleared = !!(prog && prog[i] && prog[i].best != null);
+  state.intro = { t: 0, dur: reducedMotion ? 0.6 : cleared ? 1.1 : 2.2 };
+  ui.show('playing', { stageIndex: i });
+  state.anchor = null;
+  // Mission card: what the user asks now and what this world means. It waits under the anchor
+  // phrase, stays through Observar and leaves on the first move (the clock only starts then).
+  state.mission = true; hookTipShown = false;
+  ui.mission(i);
+  if (chapterStarts(i) && lastStarted !== i) { state.anchor = { t: 0, dur: ANCHOR_T }; ui.anchor(STAGES[i].chapter); }
+  lastStarted = i;
+  ui.context(state.tr);
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  acc = 0;
+}
+function restartStage() {
+  if (state.mode !== 'playing') return;
+  state.world = Core.makeWorld(state.stage);
+  state.tr = Core.makeTranscript ? Core.makeTranscript(state.world, { name: lookName }) : null;
+  newPapers.length = 0;
+  rebindView(state.world);
+  resetInterp();
+  state.intro = null; stallT = 0;
+  if (!taught.restart) { taught.restart = true; }
+  reteach.delete('restart');
+  view.keys.forEach((kv) => { kv.amt = 0; });
+  const s = state.world.spawn;
+  burst(s[0], s[1], s[2], 16, { speed: 2.5, col: COL.amber, life: 0.5, up: 1 });
+  audio.handle([{ t: 'respawn' }], state.world);
+  squash.v = -3; popIn = 0; playerHidden = 0;
+}
+function pauseGame() {
+  if (state.mode !== 'playing') return;
+  endAnchor();
+  setPrompt(null);
+  state.mode = 'paused'; keysDown.clear();
+  audio.setPaused(true);
+  ui.show('paused', { stageIndex: state.stage, muted: !!audio.isMuted(), ambient: audio.isAmbient() !== false });
+}
+function resumeGame() {
+  if (state.mode !== 'paused') return;
+  state.mode = 'playing'; keysDown.clear(); acc = 0;
+  audio.setPaused(false);
+  ui.show('playing', { stageIndex: state.stage, resume: true });
+}
+function completeStage() {
+  const w = state.world, i = state.stage;
+  state.mode = 'complete'; state.phase = 'sweep';
+  setPrompt(taught.skip ? null : 'skip'); setLoop('verificar');
+  const result = ui.record(i, w.time, w.falls) || null;
+  const melodyDuration = Math.max(0, +audio.playMelody(w.melody, STAGES[i].root) || 0);
+  const receipt = state.tr && Core.transcriptReceipt ? Core.transcriptReceipt(state.tr) : null;
+  $('ch-ui').classList.add('ch-sweep');
+  // Visual replay keyed to the audio replay rule (0.42 s lead-in, your rhythm scaled into 1.4 to 4.4 s).
+  const mel = w.melody;
+  const t0 = mel.length ? mel[0].t : 0, t1 = mel.length ? mel[mel.length - 1].t : 0;
+  const span = mel.length > 1 ? Math.min(4.4, Math.max(1.4, (t1 - t0) * 0.3)) : 0;
+  const notes = mel.map((m) => ({ at: 0.42 + (t1 > t0 ? (m.t - t0) / (t1 - t0) : 0) * span, k: m.k, played: false }));
+  const sweepDur = melodyDuration > 0 ? Math.max(3.2, melodyDuration - 0.9) : Math.max(3.2, span + 1.2);
+  const B = w.bounds;
+  const center = new THREE.Vector3((B.min[0] + B.max[0]) / 2, (B.min[1] + B.max[1]) / 2, (B.min[2] + B.max[2]) / 2);
+  const ext = Math.max(B.max[0] - B.min[0], B.max[2] - B.min[2]);
+  state.sweep = { t: 0, dur: sweepDur, notes, center, radius: ext * 0.62 + 9, a0: Math.atan2(camera.position.x - center.x, camera.position.z - center.z), result, melodyDuration, receipt };
+}
+function showResult() {
+  if (state.mode !== 'complete' || state.phase !== 'sweep') return;
+  state.phase = 'card';
+  setPrompt(null);
+  $('ch-ui').classList.remove('ch-sweep');
+  const w = state.world;
+  ui.show('complete', { stageIndex: state.stage, time: w.time, falls: w.falls, melodyDuration: state.sweep ? state.sweep.melodyDuration : 0, result: state.sweep && state.sweep.result, receipt: state.sweep && state.sweep.receipt });
+  if (!UIPart) setTimeout(() => nextStage(), 1200); // dev fallback without the UI part
+}
+function nextStage() {
+  if (state.stage >= STAGES.length - 1) showFinale(); else startStage(state.stage + 1);
+}
+function showFinale() {
+  setPrompt(null); setLoop(null);
+  state.mode = 'finale';
+  state.world.keys.forEach((k) => { k.awake = true; });
+  const B = state.world.bounds;
+  state.sweep = { t: 0, dur: 1e9, notes: [], center: new THREE.Vector3((B.min[0] + B.max[0]) / 2, 0, (B.min[2] + B.max[2]) / 2), radius: 34, a0: 0.4 };
+  audio.ui('finale');
+  ui.show('finale');
+}
+
+/* ---------------- input: keyboard gameplay keys here, touch from ChispaUI ---------------- */
+const keysDown = new Set();
+function readInput() {
+  let x = 0, z = 0;
+  if (keysDown.has('KeyA') || keysDown.has('ArrowLeft')) x -= 1;
+  if (keysDown.has('KeyD') || keysDown.has('ArrowRight')) x += 1;
+  if (keysDown.has('KeyW') || keysDown.has('ArrowUp')) z -= 1;
+  if (keysDown.has('KeyS') || keysDown.has('ArrowDown')) z += 1;
+  const t = ui.input();
+  let jump = keysDown.has('Space'), sprint = keysDown.has('ShiftLeft') || keysDown.has('ShiftRight');
+  if (t) { x += +t.x || 0; z += +t.z || 0; jump = jump || !!t.jump; sprint = sprint || !!t.sprint; }
+  return { x, z, jump, sprint };
+}
+const GAME_KEYS = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+window.addEventListener('keydown', (e) => {
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+  audio.unlock();
+  if (e.code === 'KeyM' && !e.repeat) { const m = !audio.isMuted(); audio.setMuted(m); return; }
+  if (state.mode === 'playing') {
+    if (GAME_KEYS.has(e.code)) e.preventDefault();
+    keysDown.add(e.code);
+    if (e.repeat) return;
+    if (state.anchor) { endAnchor(); keysDown.delete('Space'); if (e.code === 'Escape') pauseGame(); return; }
+    if (e.code === 'Enter' && (state.mission || ui.missionShown())) { state.mission = false; ui.mission(null); return; }
+    if (state.intro && e.code !== 'Escape' && e.code !== 'KeyM') { endIntro(); keysDown.delete('Space'); return; }
+    if (e.code === 'KeyR') restartStage();
+    else if (e.code === 'Escape') pauseGame();
+  } else if (state.mode === 'complete' && state.phase === 'sweep') {
+    if (e.code === 'Space' || e.code === 'Enter' || e.code === 'Escape') { e.preventDefault(); taught.skip = true; showResult(); }
+  } else if (!UIPart) {
+    // Dev fallback while chispa-ui.js is missing: any key starts the first stage, Esc resumes.
+    if (state.mode === 'paused' && e.code === 'Escape') resumeGame();
+    else if (state.mode === 'title') startStage(0);
+  }
+});
+window.addEventListener('keyup', (e) => keysDown.delete(e.code));
+window.addEventListener('blur', () => { keysDown.clear(); if (state.mode === 'playing') pauseGame(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && state.mode === 'playing') pauseGame(); });
+window.addEventListener('pointerdown', () => { audio.unlock(); if (state.anchor) endAnchor(); }, { passive: true });
+canvas.addEventListener('pointerdown', () => {
+  if (state.mode === 'complete' && state.phase === 'sweep') { taught.skip = true; showResult(); }
+  else if (state.mode === 'playing' && state.intro) endIntro();
+});
+
+/* ---------------- simulation loop with interpolation ---------------- */
+let acc = 0, hitStop = 0, shake = 0, flashT = 0;
+const prevP = new THREE.Vector3(), curP = new THREE.Vector3(), drawP = new THREE.Vector3();
+let prevCrates = [];
+function snapshotPrev() { const w = state.world; prevP.fromArray(w.player.p); prevCrates = w.crates.map((c) => c.p.slice()); }
+function resetInterp() { snapshotPrev(); camInit = false; acc = 0; }
+
+const squash = { s: 1, v: 0 };
+let facing = 0, idleT = 0, leanX = 0, leanZ = 0, trailT = 0, playerHidden = 0, popIn = 1;
+
+// Visual reactions to core events. Sound for the same events goes through ChispaAudio.handle.
+function reactToEvents(w, events) {
+  const P = w.player;
+  for (const e of events) {
+    switch (e.t) {
+      case 'jump':
+        taught.jump = true; reteach.delete('jump');
+        if (e.sprint && Math.hypot(P.v[0], P.v[2]) > C.walk + 0.5) { taught.sprint = true; reteach.delete('sprint'); }
+        squash.v += 7;
+        burst(P.p[0], P.p[1] - C.r, P.p[2], 6, { speed: 1.6, col: COL.coral, life: 0.35, up: 0.2, size: 0.1 });
+        break;
+      case 'land':
+        if (e.s > 3) {
+          squash.v -= Math.min(10, e.s * 0.7);
+          burst(P.p[0], P.p[1] - C.r + 0.05, P.p[2], Math.min(18, 4 + e.s | 0), { speed: 1.5 + e.s * 0.12, col: COL.cloudLight, life: 0.45, up: 0.25, size: 0.12, drag: 4 });
+        }
+        break;
+      case 'wake': {
+        stallT = 0; nudgeT = 0;
+        const k = e.k, b = k.box, x = (b.min[0] + b.max[0]) / 2, z = (b.min[2] + b.max[2]) / 2;
+        spawnRing(x, b.max[1] + 0.05, z, Math.min(b.max[0] - b.min[0], b.max[2] - b.min[2]) * 0.8, k.type === 'f' ? COL.teal : k.type === 'c' ? COL.rose : COL.amber);
+        burst(P.p[0], b.max[1] + 0.1, P.p[2], 22, { speed: 3, col: COL.amber, life: 0.8, up: 1.2, lift: 0.3, size: 0.13, g: 2 });
+        addShake(0.1);
+        const kv = view && view.keys[k.id]; if (kv) kv.dipV -= 1.6;
+        break;
+      }
+      case 'sleep': {
+        const b = e.k.box;
+        burst((b.min[0] + b.max[0]) / 2, b.max[1] + 0.1, (b.min[2] + b.max[2]) / 2, 10, { speed: 1.2, col: e.k.type === 'c' ? COL.rose : COL.teal, life: 0.6, up: 0.6, size: 0.1 });
+        break;
+      }
+      case 'chord':
+        e.keys.forEach((k) => { const b = k.box; spawnRing((b.min[0] + b.max[0]) / 2, b.max[1] + 0.05, (b.min[2] + b.max[2]) / 2, 2.4, COL.rose); });
+        addShake(0.16);
+        break;
+      case 'death':
+        noteDeath(w, e);
+        hitStop = 3 / 60; addShake(0.38); flash();
+        burst(e.p[0], e.p[1], e.p[2], 34, { speed: 4.5, col: e.cause === 'crack' ? COL.rose : COL.amber, life: 0.7, up: 1, size: 0.14, g: 3 });
+        playerHidden = 1;
+        break;
+      case 'respawn':
+        playerHidden = 0; popIn = 0; snapshotPrev();
+        burst(P.p[0], P.p[1], P.p[2], 18, { speed: 2.2, col: COL.amber, life: 0.5, up: 1 });
+        break;
+      case 'crateReset': {
+        const c = e.c; burst(c.p[0], c.p[1], c.p[2], 14, { speed: 2, col: COL.cloudLight, life: 0.6 });
+        break;
+      }
+    }
+  }
+}
+function teachZoneNear(w, x, z, pad) {
+  const zones = w.stage.teach || [];
+  let best = null, bd = Infinity;
+  for (const zn of zones) { const d = Math.hypot(zn.at[0] - x, zn.at[1] - z) - zn.r; if (d < pad && d < bd) { bd = d; best = zn; } }
+  return best;
+}
+function noteDeath(w, e) {
+  setLoop('reintento'); shownLoop = 'actuar';
+  // The first error touched in a task: say what it was in the story (a made-up answer the hook refused).
+  if (e.cause === 'crack' && !hookTipShown) {
+    hookTipShown = true; taught.hook = true;
+    const ci = Core.crackIndex ? Core.crackIndex(w, e.p) : -1, st = w.stage.story, claim = st && st.errors && st.errors[ci];
+    ui.tip(claim ? TEXT.tipHookStory(claim[1]) : TEXT.tipHook, 5.5);
+  }
+  // A fall is recorded where the player left solid ground, not where it hit the kill plane.
+  const x = e.cause === 'fall' ? lastGround[0] : e.p[0], z = e.cause === 'fall' ? lastGround[2] : e.p[2];
+  let spot = deathSpots.find((d) => Math.hypot(d.x - x, d.z - z) < 2.5 && d.cause === e.cause);
+  if (!spot) { spot = { x, z, n: 0, cause: e.cause }; deathSpots.push(spot); }
+  spot.n++;
+  const zone = teachZoneNear(w, x, z, 2.5);
+  if (spot.n === 2) {
+    const line = zone && zone.tip ? zone.tip
+      : e.cause === 'crack' ? TEXT.tipError
+      : zone && zone.prompt === 'sprint' ? TEXT.tipSprint
+      : w.keys.some((k) => k.type === 'f' && !k.awake) && w.keys.some((k) => k.type === 'f' && k.awake) ? TEXT.tipContext
+      : TEXT.tipFall;
+    ui.tip(line, 5);
+  }
+  if (spot.n >= 3 && zone && zone.prompt) reteach.add(zone.prompt);
+}
+function addShake(a) { if (!reducedMotion) shake = Math.max(shake, a); }
+function flash() { $('ch-flash').classList.add('ch-on'); flashT = 0.06; }
+
+/* ---------------- camera ---------------- */
+const camTarget = new THREE.Vector3(), camPos = new THREE.Vector3(), look = new THREE.Vector3(), lookAhead = new THREE.Vector3();
+const vA = new THREE.Vector3(), vB = new THREE.Vector3();
+let camInit = false;
+function camOffset(out) {
+  const a = camera.aspect;
+  return a < 0.8 ? out.set(0, 12, 16.5) : a < 1.2 ? out.set(0, 6.6, 10.6) : out.set(0, 5.2, 9.4);
+}
+function updateCamera(dt, focus, vel) {
+  if (state.sweep && (state.mode === 'complete' || state.mode === 'finale')) {
+    // Stage end: orbit the whole stage while the melody plays back.
+    const s = state.sweep; s.t += dt;
+    const finale = state.mode === 'finale';
+    const k = finale ? 0 : Math.min(1, s.t / s.dur);
+    const a = s.a0 + (finale ? s.t * 0.06 : k * k * (3 - 2 * k) * 1.9);
+    vA.set(s.center.x + Math.sin(a) * s.radius, s.center.y + s.radius * 0.55, s.center.z + Math.cos(a) * s.radius);
+    camPos.lerp(vA, 1 - Math.exp(-dt * 2.2));
+    look.lerp(s.center, 1 - Math.exp(-dt * 3));
+  } else if (state.mode === 'playing' && state.intro) {
+    // Observar: start high over the whole task, settle onto Clawd.
+    const B = state.world.bounds, it = state.intro;
+    const k = Math.min(1, it.t / it.dur), e2 = k * k * (3 - 2 * k);
+    const cx = (B.min[0] + B.max[0]) / 2, cz = (B.min[2] + B.max[2]) / 2, ext = Math.max(B.max[0] - B.min[0], B.max[2] - B.min[2]);
+    vB.set(cx, B.max[1], cz);
+    vA.set(cx + ext * 0.12, B.max[1] + ext * 0.62 + 7, cz + ext * 0.5 + 9);
+    const follow = camOffset(new THREE.Vector3()).add(focus);
+    camPos.copy(vA).lerp(follow, e2);
+    look.copy(vB).lerp(new THREE.Vector3(focus.x, focus.y + 0.9, focus.z - 2.6), e2);
+    lookAhead.set(0, 0, 0);
+  } else if (state.mode === 'clawd') {
+    // Close-up of the player's Clawd beside the "Tu Clawd" panel (right on wide screens, below on phones).
+    const a = camera.aspect;
+    if (a < 0.8) { vA.set(focus.x, focus.y + 0.5, focus.z + 3.4); vB.set(focus.x, focus.y - 1.1, focus.z); }
+    else { vA.set(focus.x + 0.75, focus.y + 0.5, focus.z + 2.7); vB.set(focus.x + 0.75, focus.y + 0.05, focus.z); }
+    camPos.lerp(vA, 1 - Math.exp(-dt * 4)); look.lerp(vB, 1 - Math.exp(-dt * 4));
+  } else if (state.mode === 'title' || state.mode === 'select' || state.mode === 'boot') {
+    const t = performance.now() / 1000, B = state.world.bounds;
+    vB.set((B.min[0] + B.max[0]) / 2 + 2, 1.5, (B.min[2] + B.max[2]) / 2);
+    const a = 0.5 + Math.sin(t * 0.05) * 0.5;
+    vA.set(vB.x + Math.sin(a) * 30, 7.5, vB.z + Math.cos(a) * 30);
+    if (!camInit) { camPos.copy(vA); look.copy(vB); camInit = true; }
+    camPos.lerp(vA, 1 - Math.exp(-dt * 1.5)); look.lerp(vB, 1 - Math.exp(-dt * 2));
+  } else {
+    // Follow with eased motion and a slight look-ahead in the direction of travel.
+    vA.set(vel.x * 0.32, 0, vel.z * 0.32);
+    lookAhead.lerp(vA, 1 - Math.exp(-dt * 3));
+    camTarget.set(focus.x + lookAhead.x, focus.y, focus.z + lookAhead.z);
+    vA.copy(camTarget).add(camOffset(vB));
+    if (!camInit) { camPos.copy(vA); look.copy(camTarget); camInit = true; }
+    const kx = 1 - Math.exp(-dt * 6), ky = 1 - Math.exp(-dt * 3.5);
+    camPos.x += (vA.x - camPos.x) * kx; camPos.z += (vA.z - camPos.z) * kx; camPos.y += (vA.y - camPos.y) * ky;
+    vB.set(camTarget.x, camTarget.y + 0.9, camTarget.z - 2.6);
+    look.x += (vB.x - look.x) * kx; look.z += (vB.z - look.z) * kx; look.y += (vB.y - look.y) * ky;
+  }
+  camera.position.copy(camPos);
+  if (shake > 0.001) {
+    camera.position.x += (Math.random() - 0.5) * shake; camera.position.y += (Math.random() - 0.5) * shake * 0.7;
+    shake *= Math.exp(-dt * 9);
+  }
+  camera.lookAt(look);
+  sky.position.copy(camera.position);
+  cloudUniforms.camPos.value.copy(camera.position);
+  sun.position.copy(look).addScaledVector(sunDir, 40); sun.target.position.copy(look);
+}
+
+/* ---------------- frame ---------------- */
+function groundTopUnder(w, x, z, y) {
+  let best = -Infinity;
+  const test = (b) => { if (x >= b.min[0] && x <= b.max[0] && z >= b.min[2] && z <= b.max[2] && b.max[1] <= y + 0.05 && b.max[1] > best) best = b.max[1]; };
+  w.boxes.forEach(test); w.crates.forEach((c) => test(c.box));
+  return best;
+}
+const lastGround = [0, 0, 0];
+function updateTeaching(w, input, dt) {
+  const P = w.player;
+  if (P.g) { lastGround[0] = P.p[0]; lastGround[1] = P.p[1]; lastGround[2] = P.p[2]; }
+  const moving = Math.abs(input.x) + Math.abs(input.z) > 0.2;
+  if (moving) taught.move = true;
+  if (input.sprint && moving && P.g) sprintHeldT += dt; else sprintHeldT = 0;
+  if (sprintHeldT > 0.5) { taught.sprint = true; reteach.delete('sprint'); }
+  if (w.pushing) { taught.push = true; reteach.delete('push'); }
+  // Pick the one prompt that matters now.
+  let want = null;
+  if (state.anchor || state.intro) want = taught.skip ? null : 'skip';
+  else if (!taught.move) want = 'move';
+  else {
+    const zone = teachZoneNear(w, P.p[0], P.p[2], 0);
+    if (zone && zone.prompt && (!taught[zone.prompt] || reteach.has(zone.prompt))) want = zone.prompt;
+    else if (!taught.restart && w.crates.length && stallT > 25) want = 'restart';
+  }
+  setPrompt(want);
+}
+function hudData(w) {
+  let awake = 0, fading = null;
+  for (const k of w.keys) {
+    if (k.awake) awake++;
+    if (k.awake && !k.locked && (k.type === 'f' || k.type === 'c') && k !== w.player.onKey) fading = fading == null ? k.t : Math.min(fading, k.t);
+  }
+  return { time: w.time, falls: w.falls, awake, total: w.keys.length, fading };
+}
+const hv = new THREE.Vector3();
+const frameEvents = [];
+let last = performance.now(), crackFlick = 0, frames = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  const w = state.world;
+  if (!w) return;
+  const t = now / 1000;
+  frames++;
+  frameEvents.length = 0;
+
+  const scr = ui.screen();
+  if (scr === 'clawd' && (state.mode === 'title' || state.mode === 'select')) {
+    state.mode = 'clawd'; state.sweep = null;
+    if (state.world !== titleWorld) { backdrop(9); return; }
+  }
+  if ((scr === 'title' || scr === 'select') && state.mode !== scr && state.mode !== 'playing' && state.mode !== 'paused' && !(state.mode === 'complete' && state.phase === 'sweep')) {
+    state.mode = scr; state.sweep = null;
+    if (state.world !== titleWorld) { backdrop(9); return; }
+  }
+  if (state.mode === 'playing') {
+    const input = readInput();
+    if (state.anchor) {
+      // The chapter's anchor phrase: the world and Observar wait until it ends or is skipped.
+      state.anchor.t += dt;
+      if (state.anchor.t >= state.anchor.dur) endAnchor();
+      setLoop('observar');
+    } else if (state.intro) {
+      state.intro.t += dt;
+      const t2 = ui.input();
+      if (t2 && (Math.abs(t2.x) + Math.abs(t2.z) > 0.3 || t2.jump)) endIntro();
+      else if (state.intro.t >= state.intro.dur) endIntro();
+      setLoop('observar');
+    } else {
+      setLoop(w.started ? 'actuar' : 'pensar');
+      if (!w.player.dead) { stallT += dt; nudgeT += dt; }
+    }
+    updateTeaching(w, input, dt);
+    if (state.anchor || state.intro) { /* the world waits while Clawd observes */ }
+    else if (hitStop > 0) hitStop -= dt;
+    else {
+      acc += dt;
+      let steps = 0;
+      while (acc >= C.dt && steps < 12) {
+        snapshotPrev();
+        Core.step(w, input);
+        if (state.tr) {
+          const n0 = state.tr.papers.length;
+          Core.feedTranscript(state.tr, w.events, w);
+          for (let k = n0; k < state.tr.papers.length; k++) newPapers.push(k);
+        }
+        for (const e of w.events) frameEvents.push(e);
+        reactToEvents(w, w.events);
+        const done = w.events.some((e) => e.t === 'complete');
+        w.events.length = 0;
+        acc -= C.dt; steps++;
+        if (done || hitStop > 0) { acc = 0; break; }
+      }
+    }
+    audio.handle(frameEvents, w);
+    if (frameEvents.some((e) => e.t === 'complete')) completeStage();
+    if (state.mission && w.started) { state.mission = false; ui.mission(null); }
+    // A mission card reopened from the HUD closes once Clawd has been moving for a moment.
+    if (!state.mission && ui.missionReopened()) {
+      reopenMoveT = Math.abs(input.x) + Math.abs(input.z) > 0.2 ? reopenMoveT + dt : 0;
+      if (reopenMoveT > 0.6) { reopenMoveT = 0; ui.mission(null); }
+    } else reopenMoveT = 0;
+    if (state.mode === 'playing') ui.hud(hudData(w));
+    ui.context(state.tr); // also on the completing frame, so the assistant message lands on the board
+  }
+  const alpha = state.mode === 'playing' ? Math.min(1, acc / C.dt) : 1;
+  const P = w.player;
+  curP.fromArray(P.p);
+  drawP.lerpVectors(prevP, curP, alpha);
+
+  // Player: facing, lean, squash and stretch, flicker, trail.
+  hv.set(P.v[0], 0, P.v[2]);
+  const speed = hv.length();
+  chispa.visible = state.mode !== 'title' && state.mode !== 'select' && state.mode !== 'finale' && state.mode !== 'boot' && playerHidden === 0;
+  chispa.position.copy(drawP);
+  // Moving: face the direction of travel. Idle for a moment: turn to face the camera so Clawd's eyes show.
+  if (state.mode === 'clawd') facing = Math.PI + Math.sin(t * 0.6) * 0.55;
+  else if (speed > 0.4) { facing = Math.atan2(-P.v[0], -P.v[2]); idleT = 0; } else if ((idleT += dt) > 1.2 && state.mode === 'playing') facing = Math.atan2(camera.position.x - drawP.x, camera.position.z - drawP.z) + Math.PI;
+  let dy = facing - body.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+  body.rotation.y += dy * (1 - Math.exp(-dt * 14));
+  leanX += ((-P.v[2] / C.sprint) * 0.28 - leanX) * (1 - Math.exp(-dt * 10));
+  leanZ += ((-P.v[0] / C.sprint) * 0.28 - leanZ) * (1 - Math.exp(-dt * 10));
+  chispa.rotation.set(-leanX, 0, leanZ);
+  squash.v += (1 - squash.s) * 180 * dt; squash.v *= Math.exp(-dt * 11); squash.s += squash.v * dt;
+  const sy = Math.max(0.6, Math.min(1.45, reducedMotion ? 1 + (squash.s - 1) * 0.4 : squash.s)), sxz = 1 / Math.sqrt(sy);
+  popIn = Math.min(1, popIn + dt * 5);
+  const pop = 1 - Math.pow(1 - popIn, 3);
+  body.scale.set(sxz * pop, sy * pop, sxz * pop);
+  body.position.y = (sy - 1) * C.r * 0.5 + (P.g && speed < 0.3 ? Math.sin(t * 3) * 0.015 : 0);
+  const flick = 0.85 + Math.sin(t * 5) * 0.08 + Math.sin(t * 9) * 0.05;
+  clawdMat.emissiveIntensity = 0.3 + flick * 0.08;
+  lamp.intensity = 7 + flick * 1.5;
+  halo.material.opacity = 0.32 + flick * 0.08;
+  // Leg scurry: alternating legs while moving on the ground.
+  const run = P.g ? Math.min(1, speed / C.walk) : 0;
+  legs.forEach((leg, i) => { const ph = t * (14 + speed * 2) + (i % 2 ? Math.PI : 0); leg.position.y = -0.27 + Math.max(0, Math.sin(ph)) * 0.07 * run; leg.rotation.x = Math.sin(ph) * 0.5 * run; });
+  if (chispa.visible && state.mode === 'playing') {
+    trailT -= dt * (speed + (P.g ? 0 : 3));
+    while (trailT < 0) { trailT += reducedMotion ? 2.2 : 0.55; emit(drawP.x + (Math.random() - 0.5) * 0.15, drawP.y + 0.05 + (Math.random() - 0.5) * 0.15, drawP.z + (Math.random() - 0.5) * 0.15, { life: 0.42, size: 0.11, col: COL.amber, drag: 3, vy: 0.3 }); }
+  }
+  const gtop = chispa.visible ? groundTopUnder(w, drawP.x, drawP.z, drawP.y - C.r) : -Infinity;
+  if (gtop > -Infinity) {
+    const h = drawP.y - C.r - gtop;
+    blob.visible = true; blob.position.set(drawP.x, gtop + 0.015, drawP.z);
+    const s = 0.9 * Math.max(0.4, 1 - h * 0.12); blob.scale.set(s, 1, s); blob.material.opacity = Math.max(0.15, 1 - h * 0.15);
+  } else blob.visible = false;
+
+  // Steps, subagent links, error glitch, tools.
+  let pending = 0, nudgeKey = null;
+  for (const k of w.keys) if (!k.awake) pending++;
+  if (state.mode === 'playing' && !state.intro && nudgeT > 8) {
+    let bd = Infinity;
+    for (const k of w.keys) if (!k.awake) { const b = k.box, d = Math.hypot((b.min[0] + b.max[0]) / 2 - P.p[0], (b.min[2] + b.max[2]) / 2 - P.p[2]); if (d < bd) { bd = d; nudgeKey = k; } }
+    if (nudgeKey && (nudgeT % 1.4) < dt) { const b = nudgeKey.box; spawnRing((b.min[0] + b.max[0]) / 2, b.max[1] + 0.05, (b.min[2] + b.max[2]) / 2, 2, nudgeKey.type === 'f' ? COL.teal : nudgeKey.type === 'c' ? COL.rose : COL.amber); }
+  }
+  if (view) {
+    view.keys.forEach((kv) => {
+      const k = kv.k;
+      kv.amt += ((k.awake ? 1 : 0) - kv.amt) * (1 - Math.exp(-dt * 8));
+      kv.dipV += (-kv.dip * 260) * dt; kv.dipV *= Math.exp(-dt * 12); kv.dip += kv.dipV * dt;
+      kv.mesh.position.y = kv.y + kv.dip * 0.06;
+      kv.mat.color.copy(kv.base).lerp(COL.keyWake, kv.amt * 0.45);
+      kv.mat.emissiveIntensity = kv.amt * (0.55 + Math.sin(t * 2 + k.id) * 0.06);
+      kv.glow.material.opacity = kv.amt * 0.45;
+      if (kv.timer) {
+        // Context and subagent steps always show their clock: empty while pending, draining once done.
+        const total = k.type === 'f' ? w.fadeT : w.chordT;
+        const show = state.mode === 'playing' && !k.locked;
+        kv.timer.visible = show;
+        if (show) {
+          kv.timer.quaternion.copy(camera.quaternion);
+          const full = k.awake && (k.type === 'f' && k === w.player.onKey);
+          kv.timer.material.uniforms.progress.value = !k.awake ? 0 : full ? 1 : Math.max(0, k.t / total);
+          kv.timer.material.uniforms.alpha.value = !k.awake ? 0.45 : k.t < 1.5 && !full && !reducedMotion ? 0.6 + 0.4 * Math.sin(t * 18) : 1;
+        }
+      }
+      // Beacon: a soft column over each pending step; the last one and a stalled player's nearest one glow harder.
+      const bm = kv.beacon;
+      bm.visible = state.mode === 'playing' && !k.awake;
+      if (bm.visible) {
+        const yaw = Math.atan2(camera.position.x - bm.position.x, camera.position.z - bm.position.z);
+        bm.rotation.set(0, yaw, 0);
+        const lastOne = pending === 1, nudged = nudgeKey === k;
+        const pulse = nudged ? 0.6 + 0.4 * Math.sin(t * 7) : lastOne ? 0.8 + 0.2 * Math.sin(t * 4) : 1;
+        bm.material.uniforms.strength.value = (lastOne ? 0.9 : nudged ? 1.0 : 0.38) * pulse;
+        const wdt = bm.userData.w * (lastOne || nudged ? 1.4 : 1), hgt = lastOne || nudged ? 11 : 6;
+        bm.scale.set(wdt, hgt, 1);
+      }
+    });
+    view.threads.forEach((th) => {
+      const anyAwake = th.keys.some((k) => k.awake), locked = th.keys.every((k) => k.locked || state.mode !== 'playing' && k.awake);
+      th.line.material.opacity = locked ? 0.9 : anyAwake ? 0.6 + 0.4 * Math.sin(t * 10) : 0.4;
+      th.line.material.color.copy(locked ? COL.amber : COL.rose);
+    });
+    crackFlick -= dt;
+    if (crackFlick <= 0) {
+      crackFlick = 0.04 + Math.random() * 0.09; crackMat.emissiveIntensity = reducedMotion ? 1.2 : 0.7 + Math.random() * 1.2;
+      view.crackGlows.forEach((g) => {
+        g.material.opacity = reducedMotion ? 0.45 : 0.3 + Math.random() * 0.4;
+        const b = g.userData.box;
+        if (state.mode === 'playing' && Math.random() < 0.5) emit(b.min[0] + Math.random() * (b.max[0] - b.min[0]), b.max[1] + 0.05, b.min[2] + Math.random() * (b.max[2] - b.min[2]), { vy: 1.2 + Math.random(), life: 0.6, size: 0.1, col: COL.errorRed, drag: 1 });
+      });
+    }
+    if (view.cracks && !reducedMotion) { const g = Math.random() < 0.06; view.cracks.position.x = (Math.random() - 0.5) * (g ? 0.09 : 0.012); view.cracks.position.z = g ? (Math.random() - 0.5) * 0.06 : 0; }
+    view.crates.forEach((m, j) => {
+      const c = w.crates[j], pc = prevCrates[j] || c.p;
+      m.position.set(pc[0] + (c.p[0] - pc[0]) * alpha, pc[1] + (c.p[1] - pc[1]) * alpha, pc[2] + (c.p[2] - pc[2]) * alpha);
+    });
+  }
+
+  // Stage-complete replay: flash each key as its note plays, then show the result card.
+  if (state.mode === 'complete' && state.sweep && view) {
+    const s = state.sweep;
+    s.notes.forEach((nt) => {
+      if (nt.played || s.t < nt.at) return;
+      nt.played = true;
+      const kv = view.keys[nt.k];
+      if (!kv) return;
+      const b = kv.k.box, x = (b.min[0] + b.max[0]) / 2, z = (b.min[2] + b.max[2]) / 2;
+      kv.dipV -= 1.4; spawnRing(x, b.max[1] + 0.05, z, 1.6, COL.amber);
+      burst(x, b.max[1] + 0.2, z, 8, { speed: 2, col: COL.amber, life: 0.7, up: 1.5 });
+    });
+    if (state.phase === 'sweep' && s.t >= s.dur) showResult();
+  }
+
+  if (flashT > 0) { flashT -= dt; if (flashT <= 0) $('ch-flash').classList.remove('ch-on'); }
+  updateParticles(dt);
+  updateRings(dt);
+  updateCamera(dt, drawP, hv);
+  flyPapers(w);
+  if (view && view.labels) placeLabels(dt, state.mode === 'playing' || state.mode === 'paused' || state.mode === 'complete');
+  cloudUniforms.time.value = t;
+  motes.material.uniforms.time.value = t;
+  renderer.render(scene, camera);
+}
+
+function resize() {
+  const wdt = window.innerWidth, hgt = window.innerHeight;
+  renderer.setSize(wdt, hgt, false);
+  camera.aspect = wdt / Math.max(1, hgt);
+  camera.fov = camera.aspect < 0.8 ? 68 : 50;
+  camera.updateProjectionMatrix();
+  const pr = renderer.getPixelRatio();
+  pMat.uniforms.scale.value = hgt * pr * 0.9;
+  motes.material.uniforms.scale.value = hgt * pr * 0.9;
+}
+window.addEventListener('resize', resize);
+
+/* ---------------- boot ---------------- */
+function start(data) {
+  resize();
+  backdrop(9);
+  ui.init({
+    root: $('ch-ui'),
+    stages: STAGES,
+    on: {
+      play: (i) => startStage(i),
+      retry: () => startStage(state.stage),
+      next: () => nextStage(),
+      resume: () => resumeGame(),
+      pause: () => pauseGame(),
+      quit: () => showSelect(),
+      title: () => showTitle(),
+      mute: (m) => audio.setMuted(!!m),
+      clawd: (L) => applyLook(L),
+      ambient: (a) => audio.setAmbient(!!a)
+    },
+    sfx: (name) => { audio.unlock(); audio.ui(name); }
+  });
+  applyLook(ui.look());
+  $('ch-loading').hidden = true;
+  if (!UIPart) {
+    const p = document.createElement('p'); p.id = 'ch-devhint';
+    p.textContent = TEXT.noUI;
+    document.body.appendChild(p);
+  }
+  if (data && typeof data.stage === 'number' && data.mode === 'playing') startStage(data.stage);
+  else showTitle();
+  requestAnimationFrame((n) => { last = n; frame(n); });
+}
+window.claude?.hot?.snapshot?.(() => ({ stage: state.stage, mode: state.mode === 'paused' ? 'playing' : state.mode }));
+window.__chispa = { state, Core, startStage, showTitle, showSelect, frames: () => frames, labelRects: () => (view && view.labelRects) || [],
+  lookApplied: () => ({ color: '#' + clawdMat.color.getHexString(), dark: '#' + clawdDark.color.getHexString(), acc: accGroup.userData.id || 'ninguno', parts: accGroup.children.length, name: lookName }),
+  clawdScreen: () => { const v = chispa.position.clone(); v.y += 0.1; v.project(camera); return { x: (v.x + 1) / 2 * window.innerWidth, y: (1 - v.y) / 2 * window.innerHeight, visible: chispa.visible }; } };
+if (window.claude?.hot?.ready) window.claude.hot.ready(start); else start(window.claude?.hot?.data ?? {});
+</script>

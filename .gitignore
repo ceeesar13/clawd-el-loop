@@ -1,0 +1,21 @@
+# Build output (deployed to Cloudflare Pages)
+dist/
+
+# Local tool state
+.wrangler/
+.claude/
+.codegraph/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# Node (no dependencies today)
+node_modules/
+
+# Scratch
+*.log
+tmp/
