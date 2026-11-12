@@ -2,6 +2,14 @@
 
 _Kept as it was used while building the game: one main session, a UI worker and an audio worker, then one session per layer. "Session" means a Claude Code session._
 
+> **Hints keep clear of Clawd (2026-11-12, `fix/hints-clear-clawd`).** Additive.
+> 1. Shell: after each render, `ui.clawd(rect)` with Clawd's body (accessory included, glow left out)
+>    as `{ l, t, r, b }` in CSS pixels while playing, `null` otherwise. Debug hook: `__chispa.clawdRect()`.
+> 2. UI: `clawd(rect)` slides the control prompt and the hint line just far enough to leave Clawd
+>    (plus a short memory of his recent boxes) in view, clear of the HUD panels (`covers()`, the
+>    subagents card) and inside the screen; a hint line with no free spot narrows into a column beside
+>    him. They return home once it is clearly free. No change to physics, routes or saves.
+
 > **Tu Clawd (2026-11-11, `feat/tu-clawd`).** Additive.
 > 1. Core: `CLAWD` (colors, the first being today's Clawd; body boxes; six cube accessories plus
 >    "ninguno") shared by the render and the share card; `clawdName(name)` (one line, at most 16

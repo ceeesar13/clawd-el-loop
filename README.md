@@ -5,7 +5,7 @@ verificar. Eres Clawd, y cada mecánica del juego enseña una pieza de cómo tra
 
 > Demo de la comunidad. No es un producto oficial de Anthropic.
 
-![Clawd juega una tarea: enciende pasos, empuja una herramienta y los papeles llegan al panel de contexto](docs/img/clawd-el-loop.gif)
+![Clawd con auriculares en la pantalla Tu Clawd; luego el hook frena una respuesta inventada y los subagentes devuelven su papel al panel de contexto](docs/img/clawd-el-loop.gif)
 
 **Jugar:** [clawd-el-loop.pages.dev](https://clawd-el-loop.pages.dev/)
 

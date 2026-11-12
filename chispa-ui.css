@@ -593,6 +593,8 @@
   text-wrap: balance;
   animation: ch-caption var(--d, 5s) linear both;
 }
+/* a hint line with no free spot at full width narrows into a column beside Clawd (ChispaUI.clawd) */
+.ch-caption-slot.is-narrow .ch-caption { max-width: var(--ch-dodge-w, 12rem); font-size: .95rem; }
 .ch-caption--tip { position: relative; padding-left: 26px; box-shadow: inset 5px 0 0 var(--ch-error), 0 3px 0 var(--ch-paper-edge), 0 10px 24px rgba(12, 8, 30, .3); }
 
 /* ---------- Control prompt card ---------- */

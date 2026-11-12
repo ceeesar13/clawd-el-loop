@@ -106,7 +106,7 @@ const ui = {
   context: safe(UIPart, 'context'), anchor: safe(UIPart, 'anchor'), mission: safe(UIPart, 'mission'),
   covers: safe(UIPart, 'covers', null), fly: safe(UIPart, 'fly'),
   missionShown: safe(UIPart, 'missionShown', false), missionReopened: safe(UIPart, 'missionReopened', false),
-  look: safe(UIPart, 'look', null)
+  look: safe(UIPart, 'look', null), clawd: safe(UIPart, 'clawd')
 };
 // Only call the UI when the value changes (prompt and loop are idempotent there, but this keeps calls rare).
 let shownPrompt = undefined, shownLoop = undefined;
@@ -1283,6 +1283,25 @@ function frame(now) {
   cloudUniforms.time.value = t;
   motes.material.uniforms.time.value = t;
   renderer.render(scene, camera);
+  ui.clawd(state.mode === 'playing' ? clawdRect() : null);
+}
+
+// Clawd's body (accessory included, glow left out) as a rectangle in CSS pixels, so the HUD can
+// keep its control prompts and hints off him (ChispaUI.clawd). Read after render: matrices are fresh.
+const clawdBox = new THREE.Box3(), clawdCorner = new THREE.Vector3();
+let clawdLast = null;
+function clawdRect() {
+  if (!chispa.visible) return (clawdLast = null);
+  clawdBox.setFromObject(body);
+  const W = window.innerWidth, H = window.innerHeight, a = clawdBox.min, b = clawdBox.max;
+  let l = Infinity, t = Infinity, r = -Infinity, btm = -Infinity;
+  for (let i = 0; i < 8; i++) {
+    clawdCorner.set(i & 1 ? b.x : a.x, i & 2 ? b.y : a.y, i & 4 ? b.z : a.z).project(camera);
+    if (clawdCorner.z > 1) return (clawdLast = null); // behind the camera
+    const x = (clawdCorner.x + 1) / 2 * W, y = (1 - clawdCorner.y) / 2 * H;
+    if (x < l) l = x; if (x > r) r = x; if (y < t) t = y; if (y > btm) btm = y;
+  }
+  return (clawdLast = { l, t, r, b: btm });
 }
 
 function resize() {
@@ -1332,6 +1351,7 @@ function start(data) {
 window.claude?.hot?.snapshot?.(() => ({ stage: state.stage, mode: state.mode === 'paused' ? 'playing' : state.mode }));
 window.__chispa = { state, Core, startStage, showTitle, showSelect, frames: () => frames, labelRects: () => (view && view.labelRects) || [],
   lookApplied: () => ({ color: '#' + clawdMat.color.getHexString(), dark: '#' + clawdDark.color.getHexString(), acc: accGroup.userData.id || 'ninguno', parts: accGroup.children.length, name: lookName }),
+  clawdRect: () => clawdLast,
   clawdScreen: () => { const v = chispa.position.clone(); v.y += 0.1; v.project(camera); return { x: (v.x + 1) / 2 * window.innerWidth, y: (1 - v.y) / 2 * window.innerHeight, visible: chispa.visible }; } };
 if (window.claude?.hot?.ready) window.claude.hot.ready(start); else start(window.claude?.hot?.data ?? {});
 </script>

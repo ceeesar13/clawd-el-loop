@@ -1999,6 +1999,132 @@
     showCaption(text ? String(text) : '', secs > 0 ? secs : TIP_SECONDS, true);
   }
 
+  /* ---------- prompts and hints keep clear of Clawd ---------- */
+
+  // The shell sends Clawd's on-screen box every frame (null while he is out of play). The control
+  // prompt and the hint line each slide just far enough to leave him in view, away from the HUD
+  // panels and inside the screen; once their home spot is clearly free again they go back. A hint
+  // line with no free spot at its width narrows into a column beside Clawd.
+  var DODGE_GAP = 12;     // px kept between a prompt or hint and Clawd
+  var DODGE_FREE = 28;    // a moved one returns home only when home is this far from Clawd
+  var DODGE_MEMORY = 36;  // frames of recent boxes kept, so a jump does not shove them around
+  var DODGE_EDGE = 6;     // px kept from the screen edges
+  var DODGE_MIN_W = 140;  // narrowest hint column
+  var dodge = { trail: [], at: [{}, {}] };
+  function rectOf(n) { var r = n.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; }
+  function grow(r, m) { return { l: r.l - m, t: r.t - m, r: r.r + m, b: r.b + m }; }
+  function moved(r, dx, dy) { return { l: r.l + dx, t: r.t + dy, r: r.r + dx, b: r.b + dy }; }
+  function overlap(a, b) {
+    var w = Math.min(a.r, b.r) - Math.max(a.l, b.l), hh = Math.min(a.b, b.b) - Math.max(a.t, b.t);
+    return w > 0 && hh > 0 ? w * hh : 0;
+  }
+  function dodgeSlots() { return [S.el.promptSlot, S.el.captionSlot]; }
+  function dodgeTarget(slot) {
+    if (slot === S.el.promptSlot) {
+      var kids = slot.children;
+      for (var i = kids.length - 1; i >= 0; i--) if (!kids[i].classList.contains('is-leaving')) return kids[i];
+      return null;
+    }
+    return slot.firstElementChild;
+  }
+  function placeSlot(k, dx, dy) {
+    var slot = dodgeSlots()[k], st = dodge.at[k];
+    if ((st.dx || 0) === dx && (st.dy || 0) === dy) return;
+    st.dx = dx; st.dy = dy;
+    // Instant both ways: a transition would make the measured spot lag behind the real one.
+    slot.style.transform = dx || dy ? 'translate(' + Math.round(dx) + 'px,' + Math.round(dy) + 'px)' : '';
+  }
+  function narrowSlot(k, width) {
+    var slot = dodgeSlots()[k], st = dodge.at[k];
+    st.narrow = width > 0;
+    slot.classList.toggle('is-narrow', st.narrow);
+    if (st.narrow) slot.style.setProperty('--ch-dodge-w', Math.round(width) + 'px');
+    else { slot.style.removeProperty('--ch-dodge-w'); st.wide = null; }
+  }
+  function resetSlot(k) {
+    var st = dodge.at[k];
+    if (st.narrow) narrowSlot(k, 0);
+    placeSlot(k, 0, 0);
+    st.el = null;
+  }
+  function resetDodge() {
+    dodge.trail.length = 0;
+    for (var k = 0; k < 2; k++) if (dodge.at[k].el || dodge.at[k].dx || dodge.at[k].dy) resetSlot(k);
+  }
+  // HUD panels a prompt or hint must not cover, read fresh: the context panel grows as papers arrive.
+  function dodgeKeep() {
+    S.covers = null;
+    var keep = covers().slice(), sub = S.root && S.root.querySelector('.ch-subcard.is-on');
+    if (sub) keep.push(rectOf(sub));
+    return keep;
+  }
+  function penalty(r, env, keep, view) {
+    var p = ((r.r - r.l) * (r.b - r.t) - overlap(r, view)) * 1000 + overlap(r, env) * 1000;
+    for (var c = 0; c < keep.length; c++) p += overlap(r, keep[c]) * 10;
+    return p;
+  }
+  // The cheapest shift that clears Clawd: off-screen and over Clawd weigh most, then HUD panels, then
+  // distance. Tried: staying, and every spot that lines an edge up just beside Clawd or a HUD panel.
+  function bestShift(home, env, keep, view) {
+    var xs = [0, env.l - home.r, env.r - home.l], ys = [0, env.t - home.b, env.b - home.t];
+    for (var n = 0; n < keep.length; n++) {
+      var kp = keep[n];
+      xs.push(kp.r + DODGE_GAP - home.l, kp.l - DODGE_GAP - home.r);
+      ys.push(kp.b + DODGE_GAP - home.t, kp.t - DODGE_GAP - home.b);
+    }
+    var best = null;
+    for (var i = 0; i < xs.length; i++) {
+      for (var j = 0; j < ys.length; j++) {
+        var p = penalty(moved(home, xs[i], ys[j]), env, keep, view), cost = p + Math.abs(xs[i]) + Math.abs(ys[j]);
+        if (!best || cost < best.cost) best = { cost: cost, penalty: p, dx: xs[i], dy: ys[j] };
+      }
+    }
+    return best;
+  }
+  function clawd(rect) {
+    if (!S.ready) return;
+    if (!rect || S.screen !== 'playing') { if (S.screen !== 'playing') resetDodge(); return; }
+    dodge.trail.push(rect);
+    if (dodge.trail.length > DODGE_MEMORY) dodge.trail.shift();
+    var els = [dodgeTarget(S.el.promptSlot), dodgeTarget(S.el.captionSlot)];
+    if (!els[0] && !els[1]) { resetDodge(); return; }
+    var env = { l: Infinity, t: Infinity, r: -Infinity, b: -Infinity };
+    for (var i = 0; i < dodge.trail.length; i++) {
+      var q = dodge.trail[i];
+      env.l = Math.min(env.l, q.l); env.t = Math.min(env.t, q.t); env.r = Math.max(env.r, q.r); env.b = Math.max(env.b, q.b);
+    }
+    env = grow(env, DODGE_GAP);
+    var W = global.innerWidth, H = global.innerHeight, keep = dodgeKeep();
+    var view = { l: DODGE_EDGE, t: DODGE_EDGE, r: W - DODGE_EDGE, b: H - DODGE_EDGE };
+    // The hint line picks first (it is the bigger one), then the prompt card finds room around it.
+    for (var o = 1; o >= 0; o--) {
+      var k = o, el = els[k], st = dodge.at[k];
+      if (!el) { if (st.el || st.dx || st.dy) resetSlot(k); continue; }
+      if (el !== st.el) { if (st.narrow) narrowSlot(k, 0); st.el = el; } // a new line starts at full width
+      var now = rectOf(el), home = moved(now, -(st.dx || 0), -(st.dy || 0)), away = st.dx || st.dy || st.narrow;
+      var back = st.narrow ? st.wide : home, next = null;
+      if (!overlap(back, away ? grow(env, DODGE_FREE - DODGE_GAP) : env)) {
+        if (st.narrow) { narrowSlot(k, 0); home = back; }
+        next = { dx: 0, dy: 0 };
+      } else if (away && !penalty(now, env, keep, view)) next = { dx: st.dx || 0, dy: st.dy || 0 };
+      else {
+        next = bestShift(home, env, keep, view);
+        if (next.penalty > 0 && k === 1 && !st.narrow) {
+          // No clean spot at full width: narrow into a column on the roomier side of Clawd.
+          var side = Math.max(env.l - DODGE_EDGE, W - DODGE_EDGE - env.r);
+          if (side >= DODGE_MIN_W) {
+            st.wide = home;
+            narrowSlot(k, Math.min(side, 320));
+            now = rectOf(el); home = moved(now, -(st.dx || 0), -(st.dy || 0));
+            next = bestShift(home, env, keep, view);
+          }
+        }
+      }
+      placeSlot(k, next.dx, next.dy);
+      keep.push(moved(home, next.dx, next.dy)); // the prompt card also keeps clear of the hint line
+    }
+  }
+
   /* ---------- navigation ---------- */
 
   function setLayer(n, on) {
@@ -2229,6 +2355,7 @@
     progress: progress,
     prompt: prompt,
     tip: tip,
+    clawd: clawd,
     loop: loop,
     context: context,
     anchor: anchor,
